@@ -17,6 +17,7 @@ import (
 	"github.com/fnproject/fn/api/id"
 	"github.com/fnproject/fn/api/models"
 	"github.com/fnproject/fn/fnext"
+	docker "github.com/fsouza/go-dockerclient"
 	"github.com/sirupsen/logrus"
 	"go.opencensus.io/stats"
 	"go.opencensus.io/trace"
@@ -114,6 +115,9 @@ type agent struct {
 
 // Option configures an agent at startup
 type Option func(*agent) error
+
+// PrivateRegistryToken is a reserved call extensions key to pass registry token
+const PrivateRegistryToken = "FN_PRIVATE_REGISTRY_TOKEN"
 
 // New creates an Agent that executes functions locally as Docker containers.
 func New(da CallHandler, options ...Option) Agent {
@@ -807,18 +811,21 @@ func (a *agent) prepCold(ctx context.Context, call *call, tok ResourceToken, ch 
 		call.Config[k] = strings.Join(v, ", ")
 	}
 
+	registryToken, _ := call.extensions[PrivateRegistryToken]
+
 	container := &container{
-		id:      id.New().String(), // XXX we could just let docker generate ids...
-		image:   call.Image,
-		env:     map[string]string(call.Config),
-		memory:  call.Memory,
-		cpus:    uint64(call.CPUs),
-		fsSize:  a.cfg.MaxFsSize,
-		timeout: time.Duration(call.Timeout) * time.Second, // this is unnecessary, but in case removal fails...
-		stdin:   call.req.Body,
-		stdout:  common.NewClampWriter(call.w, a.cfg.MaxResponseSize, models.ErrFunctionResponseTooBig),
-		stderr:  call.stderr,
-		stats:   &call.Stats,
+		id:            id.New().String(), // XXX we could just let docker generate ids...
+		image:         call.Image,
+		env:           map[string]string(call.Config),
+		memory:        call.Memory,
+		cpus:          uint64(call.CPUs),
+		fsSize:        a.cfg.MaxFsSize,
+		timeout:       time.Duration(call.Timeout) * time.Second, // this is unnecessary, but in case removal fails...
+		stdin:         call.req.Body,
+		stdout:        common.NewClampWriter(call.w, a.cfg.MaxResponseSize, models.ErrFunctionResponseTooBig),
+		stderr:        call.stderr,
+		stats:         &call.Stats,
+		registryToken: registryToken,
 	}
 
 	cookie, err := a.driver.CreateCookie(ctx, container)
@@ -1035,8 +1042,9 @@ type container struct {
 	syslogConns io.WriteCloser
 
 	// swapMu protects the stats swapping
-	swapMu sync.Mutex
-	stats  *drivers.Stats
+	swapMu        sync.Mutex
+	stats         *drivers.Stats
+	registryToken string
 }
 
 //newHotContainer creates a container that can be used for multiple sequential events
@@ -1175,7 +1183,11 @@ func (c *container) WriteStat(ctx context.Context, stat drivers.Stat) {
 	c.swapMu.Unlock()
 }
 
-//func (c *container) DockerAuth() (docker.AuthConfiguration, error) {
-// Implementing the docker.AuthConfiguration interface.
-// TODO per call could implement this stored somewhere (vs. configured on host)
-//}
+func (c *container) DockerAuth() (*docker.AuthConfiguration, error) {
+	if c.registryToken != "" {
+		return &docker.AuthConfiguration{
+			RegistryToken: c.registryToken,
+		}, nil
+	}
+	return nil, nil
+}

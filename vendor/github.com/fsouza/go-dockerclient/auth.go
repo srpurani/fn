@@ -32,6 +32,8 @@ type AuthConfiguration struct {
 	// see https://godoc.org/github.com/docker/docker/api/types#AuthConfig
 	// It can be used in place of password not in conjunction with it
 	IdentityToken string `json:"identitytoken,omitempty"`
+
+	RegistryToken string `json:"registrytoken,omitempty"`
 }
 
 // AuthConfigurations represents authentication options to use for the

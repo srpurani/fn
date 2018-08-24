@@ -466,6 +466,8 @@ type call struct {
 
 	// LB & Pure Runner Extra Config
 	extensions map[string]string
+
+	registryToken string
 }
 
 // SlotHashId returns a string identity for this call that can be used to uniquely place the call in a given container
